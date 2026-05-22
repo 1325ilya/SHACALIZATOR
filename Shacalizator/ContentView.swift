@@ -1,13 +1,18 @@
 import SwiftUI
 import PhotosUI
 import Observation
+import AVKit
+import UniformTypeIdentifiers
 
 @Observable
 final class ContentViewModel {
     var selectedImage: UIImage?
     var processedImage: UIImage?
-    var selectedPreset: ShacalPreset?
+    var selectedVideoURL: URL?
+    var processedVideoURL: URL?
+    var isVideo: Bool = false
     var isProcessing: Bool = false
+    var processingProgress: Double = 0.0
     var showingOriginal: Bool = false
     var toastMessage: String?
     var showToast: Bool = false
@@ -15,24 +20,56 @@ final class ContentViewModel {
     var selectedPhotoItem: PhotosPickerItem? {
         didSet {
             guard let item = selectedPhotoItem else { return }
-            loadImage(from: item)
+            loadMedia(from: item)
         }
     }
 
-    private func loadImage(from item: PhotosPickerItem) {
+    private func loadMedia(from item: PhotosPickerItem) {
         Task { @MainActor in
             isProcessing = true
+            processingProgress = 0.0
             defer { isProcessing = false }
 
-            guard let data = try? await item.loadTransferable(type: Data.self),
-                  let fullImage = UIImage(data: data) else {
-                return
-            }
-
-            let downsampled = downsample(fullImage, maxDimension: 4096)
-            selectedImage = downsampled
+            // Reset old state
+            selectedImage = nil
             processedImage = nil
+            selectedVideoURL = nil
+            processedVideoURL = nil
             selectedPreset = nil
+            isVideo = false
+
+            // Check if it conforms to video/movie
+            let isMovie = item.supportedContentTypes.contains(where: { $0.conforms(to: .movie) })
+            if isMovie {
+                do {
+                    if let tempURL = try await item.loadTransferable(type: URL.self) {
+                        let destinationURL = FileManager.default.temporaryDirectory
+                            .appendingPathComponent(UUID().uuidString)
+                            .appendingPathExtension(tempURL.pathExtension.isEmpty ? "mp4" : tempURL.pathExtension)
+                        try FileManager.default.copyItem(at: tempURL, to: destinationURL)
+                        
+                        selectedVideoURL = destinationURL
+                        isVideo = true
+                    } else {
+                        toastMessage = "Не удалось загрузить видео"
+                        showToast = true
+                    }
+                } catch {
+                    toastMessage = "Ошибка при загрузке видео: \(error.localizedDescription)"
+                    showToast = true
+                }
+            } else {
+                // Load as image
+                if let data = try? await item.loadTransferable(type: Data.self),
+                   let fullImage = UIImage(data: data) {
+                    let downsampled = downsample(fullImage, maxDimension: 4096)
+                    selectedImage = downsampled
+                    isVideo = false
+                } else {
+                    toastMessage = "Не удалось загрузить фото"
+                    showToast = true
+                }
+            }
         }
     }
 
@@ -50,43 +87,92 @@ final class ContentViewModel {
         }
     }
 
+    var selectedPreset: ShacalPreset?
+
     func selectPreset(_ preset: ShacalPreset) {
-        guard let sourceImage = selectedImage else { return }
+        if isVideo {
+            guard let sourceURL = selectedVideoURL else { return }
+            
+            if selectedPreset == preset {
+                selectedPreset = nil
+                processedVideoURL = nil
+                return
+            }
+            
+            selectedPreset = preset
+            isProcessing = true
+            processingProgress = 0.0
+            
+            Task { @MainActor in
+                do {
+                    let result = try await VideoProcessor.process(videoURL: sourceURL, preset: preset) { progress in
+                        Task { @MainActor in
+                            self.processingProgress = progress
+                        }
+                    }
+                    processedVideoURL = result
+                    isProcessing = false
+                    showingOriginal = false
+                } catch {
+                    isProcessing = false
+                    toastMessage = "Ошибка обработки видео: \(error.localizedDescription)"
+                    showToast = true
+                }
+            }
+        } else {
+            guard let sourceImage = selectedImage else { return }
 
-        if selectedPreset == preset {
-            selectedPreset = nil
-            processedImage = nil
-            return
-        }
+            if selectedPreset == preset {
+                selectedPreset = nil
+                processedImage = nil
+                return
+            }
 
-        selectedPreset = preset
-        isProcessing = true
+            selectedPreset = preset
+            isProcessing = true
 
-        Task { @MainActor in
-            let result = await ImageProcessor.process(image: sourceImage, preset: preset)
-            processedImage = result
-            isProcessing = false
-            showingOriginal = false
-        }
-    }
-
-    func saveImage() {
-        guard let image = processedImage else { return }
-
-        Task { @MainActor in
-            do {
-                try await SaveManager.saveToPhotos(image)
-                toastMessage = "Сохранено в Фото"
-                showToast = true
-            } catch {
-                toastMessage = "Ошибка сохранения"
-                showToast = true
+            Task { @MainActor in
+                let result = await ImageProcessor.process(image: sourceImage, preset: preset)
+                processedImage = result
+                isProcessing = false
+                showingOriginal = false
             }
         }
     }
 
-    func shareImage() -> UIImage? {
-        processedImage
+    func saveProcessedMedia() {
+        if isVideo {
+            guard let url = processedVideoURL else { return }
+            isProcessing = true
+            processingProgress = 1.0
+            
+            Task { @MainActor in
+                defer { isProcessing = false }
+                do {
+                    try await SaveManager.saveVideoToPhotos(url)
+                    toastMessage = "Видео сохранено в Фото"
+                    showToast = true
+                } catch {
+                    toastMessage = error.localizedDescription
+                    showToast = true
+                }
+            }
+        } else {
+            guard let image = processedImage else { return }
+            isProcessing = true
+            
+            Task { @MainActor in
+                defer { isProcessing = false }
+                do {
+                    try await SaveManager.saveToPhotos(image)
+                    toastMessage = "Фото сохранено в Фото"
+                    showToast = true
+                } catch {
+                    toastMessage = error.localizedDescription
+                    showToast = true
+                }
+            }
+        }
     }
 }
 
@@ -131,7 +217,7 @@ struct ContentView: View {
                             get: { viewModel.selectedPhotoItem },
                             set: { viewModel.selectedPhotoItem = $0 }
                         ),
-                        matching: .images,
+                        matching: .any(of: [.images, .videos]),
                         photoLibrary: .shared()
                     ) {
                         Image(systemName: "photo.badge.plus")
@@ -143,29 +229,45 @@ struct ContentView: View {
                 }
             }
             .animation(.spring(duration: 0.4, bounce: 0.2), value: viewModel.showToast)
-            .animation(.easeInOut(duration: 0.35), value: viewModel.selectedImage != nil)
+            .animation(.easeInOut(duration: 0.35), value: viewModel.selectedImage != nil || viewModel.selectedVideoURL != nil)
             .animation(.easeInOut(duration: 0.3), value: viewModel.selectedPreset)
         }
     }
 
     @ViewBuilder
     private var mainContent: some View {
-        if let selectedImage = viewModel.selectedImage {
+        if viewModel.selectedImage != nil || viewModel.selectedVideoURL != nil {
             ScrollView(.vertical, showsIndicators: false) {
                 VStack(spacing: 20) {
-                    ImageComparisonView(
-                        originalImage: selectedImage,
-                        processedImage: viewModel.processedImage,
-                        showingOriginal: Binding(
-                            get: { viewModel.showingOriginal },
-                            set: { viewModel.showingOriginal = $0 }
-                        )
-                    )
-                    .padding(.horizontal, 16)
+                    if viewModel.isVideo {
+                        if let originalURL = viewModel.selectedVideoURL {
+                            VideoComparisonView(
+                                originalURL: originalURL,
+                                processedURL: viewModel.processedVideoURL,
+                                showingOriginal: Binding(
+                                    get: { viewModel.showingOriginal },
+                                    set: { viewModel.showingOriginal = $0 }
+                                )
+                            )
+                            .padding(.horizontal, 16)
+                        }
+                    } else {
+                        if let selectedImage = viewModel.selectedImage {
+                            ImageComparisonView(
+                                originalImage: selectedImage,
+                                processedImage: viewModel.processedImage,
+                                showingOriginal: Binding(
+                                    get: { viewModel.showingOriginal },
+                                    set: { viewModel.showingOriginal = $0 }
+                                )
+                            )
+                            .padding(.horizontal, 16)
+                        }
+                    }
 
                     presetSection
 
-                    if viewModel.processedImage != nil {
+                    if viewModel.processedImage != nil || viewModel.processedVideoURL != nil {
                         actionButtons
                             .transition(.move(edge: .bottom).combined(with: .opacity))
                     }
@@ -173,9 +275,17 @@ struct ContentView: View {
                 .padding(.vertical, 16)
             }
         } else {
-            EmptyStateView {
-                // PhotosPicker is in toolbar; this provides a secondary tap target
+            PhotosPicker(
+                selection: Binding(
+                    get: { viewModel.selectedPhotoItem },
+                    set: { viewModel.selectedPhotoItem = $0 }
+                ),
+                matching: .any(of: [.images, .videos]),
+                photoLibrary: .shared()
+            ) {
+                EmptyStateView { }
             }
+            .buttonStyle(.plain)
         }
     }
 
@@ -207,7 +317,7 @@ struct ContentView: View {
     private var actionButtons: some View {
         HStack(spacing: 16) {
             Button {
-                viewModel.saveImage()
+                viewModel.saveProcessedMedia()
             } label: {
                 Label("Сохранить", systemImage: "square.and.arrow.down")
                     .font(.subheadline)
@@ -218,20 +328,36 @@ struct ContentView: View {
             .buttonStyle(.borderedProminent)
             .tint(.accentColor)
 
-            if let shareImage = viewModel.processedImage,
-               let imageData = shareImage.jpegData(compressionQuality: 0.8) {
-                ShareLink(
-                    item: Image(uiImage: shareImage),
-                    preview: SharePreview("Шакализированное фото", image: Image(uiImage: shareImage))
-                ) {
-                    Label("Поделиться", systemImage: "square.and.arrow.up")
-                        .font(.subheadline)
-                        .fontWeight(.semibold)
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 14)
+            if viewModel.isVideo {
+                if let processedVideoURL = viewModel.processedVideoURL {
+                    ShareLink(
+                        item: processedVideoURL,
+                        preview: SharePreview("Шакализированное видео", icon: Image(systemName: "video.fill"))
+                    ) {
+                        Label("Поделиться", systemImage: "square.and.arrow.up")
+                            .font(.subheadline)
+                            .fontWeight(.semibold)
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 14)
+                    }
+                    .buttonStyle(.bordered)
+                    .tint(.accentColor)
                 }
-                .buttonStyle(.bordered)
-                .tint(.accentColor)
+            } else {
+                if let shareImage = viewModel.processedImage {
+                    ShareLink(
+                        item: Image(uiImage: shareImage),
+                        preview: SharePreview("Шакализированное фото", image: Image(uiImage: shareImage))
+                    ) {
+                        Label("Поделиться", systemImage: "square.and.arrow.up")
+                            .font(.subheadline)
+                            .fontWeight(.semibold)
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 14)
+                    }
+                    .buttonStyle(.bordered)
+                    .tint(.accentColor)
+                }
             }
         }
         .padding(.horizontal, 16)
@@ -249,10 +375,17 @@ struct ContentView: View {
                     .controlSize(.large)
                     .tint(.white)
 
-                Text("Шакализация...")
-                    .font(.subheadline)
-                    .fontWeight(.medium)
-                    .foregroundStyle(.white)
+                if viewModel.isVideo {
+                    Text("Шакализация... \(Int(viewModel.processingProgress * 100))%")
+                        .font(.subheadline)
+                        .fontWeight(.medium)
+                        .foregroundStyle(.white)
+                } else {
+                    Text("Шакализация...")
+                        .font(.subheadline)
+                        .fontWeight(.medium)
+                        .foregroundStyle(.white)
+                }
             }
             .padding(32)
             .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 20))
@@ -284,6 +417,124 @@ struct ContentView: View {
                 )
             }
         }
+    }
+}
+
+// MARK: - Video Comparison Component
+
+struct VideoComparisonView: View {
+    let originalURL: URL
+    let processedURL: URL?
+    @Binding var showingOriginal: Bool
+
+    @State private var player = AVPlayer()
+    @State private var isPlaying = true
+
+    var body: some View {
+        VStack(spacing: 14) {
+            // Segmented picker
+            if processedURL != nil {
+                Picker("Режим", selection: $showingOriginal) {
+                    Text("Оригинал").tag(true)
+                    Text("Результат").tag(false)
+                }
+                .pickerStyle(.segmented)
+                .padding(.horizontal, 4)
+            }
+
+            // Video Player Display with Play/Pause overlay
+            ZStack {
+                VideoPlayer(player: player)
+                    .clipShape(RoundedRectangle(cornerRadius: 12))
+                    .frame(height: 360)
+
+                // Optional custom overlay
+                VStack {
+                    Spacer()
+                    HStack {
+                        Button {
+                            if isPlaying {
+                                player.pause()
+                                isPlaying = false
+                            } else {
+                                player.play()
+                                isPlaying = true
+                            }
+                        } label: {
+                            Image(systemName: isPlaying ? "pause.fill" : "play.fill")
+                                .font(.title3)
+                                .foregroundColor(.white)
+                                .padding(10)
+                                .background(.black.opacity(0.4), in: Circle())
+                        }
+                        .padding(12)
+                        Spacer()
+                    }
+                }
+            }
+            .clipShape(RoundedRectangle(cornerRadius: 12))
+
+            // Size and File Size info
+            let activeURL = (showingOriginal || processedURL == nil) ? originalURL : processedURL
+            if let activeURL = activeURL {
+                HStack(spacing: 8) {
+                    Image(systemName: "video")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                    
+                    Text(getFileSizeString(url: activeURL))
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .monospacedDigit()
+                }
+            }
+        }
+        .padding(14)
+        .glassBackground(cornerRadius: 20)
+        .onAppear {
+            setupPlayer()
+        }
+        .onChange(of: showingOriginal) { _, _ in
+            setupPlayer()
+        }
+        .onChange(of: processedURL) { _, _ in
+            setupPlayer()
+        }
+        .onDisappear {
+            player.pause()
+        }
+    }
+
+    private func setupPlayer() {
+        let activeURL = (showingOriginal || processedURL == nil) ? originalURL : processedURL!
+        player.pause()
+        
+        let playerItem = AVPlayerItem(url: activeURL)
+        player.replaceCurrentItem(with: playerItem)
+        
+        NotificationCenter.default.removeObserver(self, name: .AVPlayerItemDidPlayToEndTime, object: nil)
+        NotificationCenter.default.addObserver(
+            forName: .AVPlayerItemDidPlayToEndTime,
+            object: playerItem,
+            queue: .main
+        ) { _ in
+            player.seek(to: .zero)
+            player.play()
+        }
+        
+        player.play()
+        isPlaying = true
+    }
+
+    private func getFileSizeString(url: URL) -> String {
+        guard let attributes = try? FileManager.default.attributesOfItem(atPath: url.path),
+              let fileSize = attributes[.size] as? Int64 else {
+            return ""
+        }
+        let formatter = ByteCountFormatter()
+        formatter.allowedUnits = [.useAll]
+        formatter.countStyle = .file
+        return formatter.string(fromByteCount: fileSize)
     }
 }
 

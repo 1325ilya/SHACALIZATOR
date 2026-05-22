@@ -18,6 +18,7 @@
 		089C1688B6A7D8F10023E14A /* ImageComparisonView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 089C1678B6A7D8F10023E14A /* ImageComparisonView.swift */; };
 		089C1689B6A7D8F10023E14A /* ToastView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 089C1679B6A7D8F10023E14A /* ToastView.swift */; };
 		089C168AB6A7D8F10023E14A /* GlassBackgroundModifier.swift in Sources */ = {isa = PBXBuildFile; fileRef = 089C167AB6A7D8F10023E14A /* GlassBackgroundModifier.swift */; };
+		089C168CB6A7D8F10023E14A /* VideoProcessor.swift in Sources */ = {isa = PBXBuildFile; fileRef = 089C167DB6A7D8F10023E14A /* VideoProcessor.swift */; };
 		089C168BB6A7D8F10023E14A /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 089C167BB6A7D8F10023E14A /* Assets.xcassets */; };
 /* End PBXBuildFile section */
 
@@ -34,6 +35,7 @@
 		089C1678B6A7D8F10023E14A /* ImageComparisonView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ImageComparisonView.swift; sourceTree = "<group>"; };
 		089C1679B6A7D8F10023E14A /* ToastView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ToastView.swift; sourceTree = "<group>"; };
 		089C167AB6A7D8F10023E14A /* GlassBackgroundModifier.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GlassBackgroundModifier.swift; sourceTree = "<group>"; };
+		089C167DB6A7D8F10023E14A /* VideoProcessor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VideoProcessor.swift; sourceTree = "<group>"; };
 		089C167BB6A7D8F10023E14A /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		089C167CB6A7D8F10023E14A /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 /* End PBXFileReference section */
@@ -66,6 +68,7 @@
 				089C1673B6A7D8F10023E14A /* ShacalPreset.swift */,
 				089C1674B6A7D8F10023E14A /* SaveManager.swift */,
 				089C1675B6A7D8F10023E14A /* PhotoPickerView.swift */,
+				089C167DB6A7D8F10023E14A /* VideoProcessor.swift */,
 				089C1668B6A7D8F10023E14A /* Components */,
 				089C167BB6A7D8F10023E14A /* Assets.xcassets */,
 				089C167CB6A7D8F10023E14A /* Info.plist */,
@@ -173,6 +176,7 @@
 				089C1688B6A7D8F10023E14A /* ImageComparisonView.swift in Sources */,
 				089C1689B6A7D8F10023E14A /* ToastView.swift in Sources */,
 				089C168AB6A7D8F10023E14A /* GlassBackgroundModifier.swift in Sources */,
+				089C168CB6A7D8F10023E14A /* VideoProcessor.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

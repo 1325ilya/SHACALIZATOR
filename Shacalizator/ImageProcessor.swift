@@ -12,6 +12,10 @@ enum ImageProcessor {
         }.value
     }
 
+    static func processSyncForVideo(image: UIImage, preset: ShacalPreset) -> UIImage? {
+        processSync(image: image, preset: preset)
+    }
+
     // MARK: - Pipeline
 
     private static func processSync(image: UIImage, preset: ShacalPreset) -> UIImage? {
@@ -33,6 +37,15 @@ enum ImageProcessor {
         current = autoreleasepool { () -> UIImage? in
             guard let img = current else { return nil }
             return downscale(img, factor: preset.downscaleFactor)
+        }
+
+        // Custom Deep-fry and sticker overlays for megasupershacal
+        if preset == .megasupershacal {
+            current = autoreleasepool { () -> UIImage? in
+                guard let img = current else { return nil }
+                guard let fried = applyDeepFry(to: img, context: context) else { return img }
+                return applyStickerOverlays(to: fried)
+            }
         }
 
         // Step 2 – JPEG recompression passes
@@ -225,6 +238,118 @@ enum ImageProcessor {
         guard let output = unsharp.outputImage?.cropped(to: extent) else { return nil }
 
         return renderToUIImage(output, extent: extent, context: context)
+    }
+
+    /// Apply extreme deep fry (massive saturation and contrast boost)
+    private static func applyDeepFry(to image: UIImage, context: CIContext) -> UIImage? {
+        guard let cgImage = image.cgImage else { return nil }
+        let ciImage = CIImage(cgImage: cgImage)
+        let extent = ciImage.extent
+
+        let controls = CIFilter.colorControls()
+        controls.inputImage = ciImage
+        controls.saturation = 3.0
+        controls.contrast = 2.8
+        controls.brightness = 0.02
+        guard let output = controls.outputImage?.cropped(to: extent) else { return nil }
+
+        return renderToUIImage(output, extent: extent, context: context)
+    }
+
+    /// Render toxic stickers and scratch paths on top of the image to recreate megasupershacal look
+    private static func applyStickerOverlays(to image: UIImage) -> UIImage {
+        let size = image.size
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = image.scale
+        format.opaque = true
+
+        let renderer = UIGraphicsImageRenderer(size: size, format: format)
+        return renderer.image { ctx in
+            // Draw original image first
+            image.draw(in: CGRect(origin: .zero, size: size))
+
+            let cg = ctx.cgContext
+
+            // 1. Draw scratch stars/scribbles in the top-right corner
+            cg.setStrokeColor(UIColor.white.cgColor)
+            cg.setLineWidth(max(2, size.width * 0.005))
+            
+            // Draw white scratch star 1
+            let trX = size.width * 0.8
+            let trY = size.height * 0.15
+            let r = size.width * 0.08
+            for i in 0..<8 {
+                let angle = CGFloat(i) * .pi / 4.0
+                let start = CGPoint(x: trX, y: trY)
+                let end = CGPoint(x: trX + cos(angle) * r, y: trY + sin(angle) * r)
+                cg.move(to: start)
+                cg.addLine(to: end)
+            }
+            cg.strokePath()
+
+            // 2. Draw pink dead face sticker in top-left
+            let pinkColor = UIColor(red: 1.0, green: 0.07, blue: 0.57, alpha: 0.8)
+            cg.setStrokeColor(pinkColor.cgColor)
+            cg.setLineWidth(max(3, size.width * 0.008))
+            
+            let tlX = size.width * 0.15
+            let tlY = size.height * 0.15
+            let tlR = size.width * 0.09
+            
+            // Draw circle
+            cg.addArc(center: CGPoint(x: tlX, y: tlY), radius: tlR, startAngle: 0, endAngle: .pi * 2, clockwise: true)
+            cg.strokePath()
+            
+            // Draw cross eyes
+            let eyeOffset = tlR * 0.35
+            // Left eye cross
+            cg.move(to: CGPoint(x: tlX - eyeOffset - eyeOffset/2, y: tlY - eyeOffset - eyeOffset/2))
+            cg.addLine(to: CGPoint(x: tlX - eyeOffset + eyeOffset/2, y: tlY - eyeOffset + eyeOffset/2))
+            cg.move(to: CGPoint(x: tlX - eyeOffset + eyeOffset/2, y: tlY - eyeOffset - eyeOffset/2))
+            cg.addLine(to: CGPoint(x: tlX - eyeOffset - eyeOffset/2, y: tlY - eyeOffset + eyeOffset/2))
+            
+            // Right eye cross
+            cg.move(to: CGPoint(x: tlX + eyeOffset - eyeOffset/2, y: tlY - eyeOffset - eyeOffset/2))
+            cg.addLine(to: CGPoint(x: tlX + eyeOffset + eyeOffset/2, y: tlY - eyeOffset + eyeOffset/2))
+            cg.move(to: CGPoint(x: tlX + eyeOffset + eyeOffset/2, y: tlY - eyeOffset - eyeOffset/2))
+            cg.addLine(to: CGPoint(x: tlX + eyeOffset - eyeOffset/2, y: tlY - eyeOffset + eyeOffset/2))
+            
+            // Mouth
+            cg.move(to: CGPoint(x: tlX - eyeOffset, y: tlY + eyeOffset))
+            cg.addLine(to: CGPoint(x: tlX + eyeOffset, y: tlY + eyeOffset))
+            cg.strokePath()
+
+            // 3. Draw a toxic skull emoji in bottom-right
+            let skullFontSize = size.width * 0.15
+            let font = UIFont.systemFont(ofSize: skullFontSize)
+            let skullString = "💀" as NSString
+            let skullRect = CGRect(
+                x: size.width * 0.78,
+                y: size.height * 0.78,
+                width: skullFontSize * 1.2,
+                height: skullFontSize * 1.2
+            )
+            skullString.draw(in: skullRect, withAttributes: [.font: font])
+
+            // Draw a green radioactive symbol in bottom-right corner as well
+            let bioString = "☣️" as NSString
+            let bioRect = CGRect(
+                x: size.width * 0.65,
+                y: size.height * 0.82,
+                width: skullFontSize * 0.8,
+                height: skullFontSize * 0.8
+            )
+            bioString.draw(in: bioRect, withAttributes: [.font: UIFont.systemFont(ofSize: skullFontSize * 0.8)])
+
+            // 4. Draw pixelated glitch blocks in bottom-left
+            let blockColor = UIColor(red: 0.0, green: 1.0, blue: 0.9, alpha: 0.7)
+            cg.setFillColor(blockColor.cgColor)
+            let gbSize = size.width * 0.08
+            cg.fill(CGRect(x: size.width * 0.05, y: size.height * 0.8, width: gbSize * 2, height: gbSize * 0.4))
+            
+            cg.setFillColor(UIColor.red.withAlphaComponent(0.6).cgColor)
+            cg.fill(CGRect(x: size.width * 0.1, y: size.height * 0.83, width: gbSize * 1.5, height: gbSize * 0.3))
+        }
     }
 
     // MARK: - Helpers

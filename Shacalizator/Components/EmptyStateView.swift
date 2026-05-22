@@ -27,12 +27,12 @@ struct EmptyStateView: View {
                     )
 
                 VStack(spacing: 8) {
-                    Text("Выберите фото")
+                    Text("Выберите медиа")
                         .font(.title2)
                         .fontWeight(.bold)
                         .foregroundStyle(.primary)
 
-                    Text("Загрузите изображение, чтобы начать шакализацию")
+                    Text("Загрузите фото или видео для шакализации")
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
                         .multilineTextAlignment(.center)
