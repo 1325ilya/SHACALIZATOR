@@ -1,0 +1,18 @@
+# Xcode
+build/
+DerivedData/
+*.xcuserdata/
+xcuserdata/
+*.xcworkspace/xcuserdata/
+
+# Build artifacts
+*.ipa
+Payload/
+
+# macOS
+.DS_Store
+*.swp
+*~
+
+# VS Code
+.vscode/
