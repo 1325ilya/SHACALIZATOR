@@ -136,8 +136,8 @@ chmod +x build_unsigned_ipa.sh
 
 ## Технологии
 
-- Swift 6 / SwiftUI
-- iOS 26+ deployment target
+- Swift 5 / SwiftUI
+- iOS 17.0+ deployment target (для широкой совместимости и стабильности)
 - PhotosUI, CoreImage, ImageIO
 - @Observable (Observation framework)
 - Glass-morphism UI
