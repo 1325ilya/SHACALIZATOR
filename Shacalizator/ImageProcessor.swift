@@ -6,6 +6,12 @@ enum ImageProcessor {
 
     private static let maxInputDimension: CGFloat = 4096
 
+    private static let sharedContext = CIContext(options: [
+        .useSoftwareRenderer: false,
+        .highQualityDownsample: false,
+        .cacheIntermediates: false
+    ])
+
     static func process(image: UIImage, preset: ShacalPreset) async -> UIImage? {
         await Task.detached(priority: .userInitiated) {
             processSync(image: image, preset: preset)
@@ -19,11 +25,7 @@ enum ImageProcessor {
     // MARK: - Pipeline
 
     private static func processSync(image: UIImage, preset: ShacalPreset) -> UIImage? {
-        let context = CIContext(options: [
-            .useSoftwareRenderer: false,
-            .highQualityDownsample: false,
-            .cacheIntermediates: false
-        ])
+        let context = sharedContext
 
         var current: UIImage? = image
 

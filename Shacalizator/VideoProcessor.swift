@@ -91,21 +91,25 @@ enum VideoProcessor {
         
         if let audioTrack = try await asset.loadTracks(withMediaType: .audio).first {
             let audioReaderSettings: [String: Any] = [
-                AVFormatIDKey: kAudioFormatLinearPCM
+                AVFormatIDKey: kAudioFormatLinearPCM,
+                AVLinearPCMBitDepthKey: 16,
+                AVLinearPCMIsFloatKey: false,
+                AVLinearPCMIsBigEndianKey: false,
+                AVLinearPCMIsNonInterleaved: false
             ]
             audioReaderOutput = AVAssetReaderTrackOutput(track: audioTrack, outputSettings: audioReaderSettings)
             reader.add(audioReaderOutput!)
             
-            // Audio compression settings: mono, very low sample rate (8kHz) for distorted mic quality!
+            // Audio compression settings: mono, standard low quality (11.025kHz, 24kbps) for fully supported high-distortion quality!
             var acl = AudioChannelLayout()
             acl.mChannelLayoutTag = kAudioChannelLayoutTag_Mono
             let aclData = Data(bytes: &acl, count: MemoryLayout<AudioChannelLayout>.size)
             
             let audioSettings: [String: Any] = [
                 AVFormatIDKey: kAudioFormatMPEG4AAC,
-                AVSampleRateKey: 8000.0, // 8 kHz!
+                AVSampleRateKey: 11025.0,
                 AVNumberOfChannelsKey: 1,
-                AVEncoderBitRateKey: 8000, // 8 kbps!
+                AVEncoderBitRateKey: 24000,
                 AVChannelLayoutKey: aclData
             ]
             
@@ -123,6 +127,7 @@ enum VideoProcessor {
         let audioQueue = DispatchQueue(label: "com.vonexl.shacalizator.audio_processing")
         
         let group = DispatchGroup()
+        let frameContext = CIContext()
         
         // Process Video track
         group.enter()
@@ -134,8 +139,7 @@ enum VideoProcessor {
                     // Convert frame to UIImage, process it, and write it back!
                     if let pixelBuffer = CMSampleBufferGetImageBuffer(sampleBuffer) {
                         let ciImage = CIImage(cvPixelBuffer: pixelBuffer)
-                        let context = CIContext()
-                        if let cgImage = context.createCGImage(ciImage, from: ciImage.extent) {
+                        if let cgImage = frameContext.createCGImage(ciImage, from: ciImage.extent) {
                             let uiImage = UIImage(cgImage: cgImage)
                             
                             // Process frame through the standard ImageProcessor pipeline!
@@ -177,8 +181,11 @@ enum VideoProcessor {
             }
         }
         
-        return await withCheckedContinuation { continuation in
+        return try await withCheckedThrowingContinuation { continuation in
             group.notify(queue: .main) {
+                let readerError = reader.error
+                let writerError = writer.error
+                
                 reader.cancelReading()
                 writer.finishWriting {
                     if writer.status == .completed {
@@ -186,7 +193,8 @@ enum VideoProcessor {
                         continuation.resume(returning: outputURL)
                     } else {
                         progressHandler(1.0)
-                        continuation.resume(returning: videoURL)
+                        let error = writerError ?? readerError ?? VideoError.writerFailed
+                        continuation.resume(throwing: error)
                     }
                 }
             }
