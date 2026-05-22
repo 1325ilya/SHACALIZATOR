@@ -197,7 +197,8 @@ enum VideoProcessor {
         var pixelBuffer: CVPixelBuffer? = nil
         let attrs = [
             kCVPixelBufferCGImageCompatibilityKey: kCFBooleanTrue!,
-            kCVPixelBufferCVPixelFormatTypeKey: kCFBooleanTrue!,
+            kCVPixelBufferCGBitmapContextCompatibilityKey: kCFBooleanTrue!,
+            kCVPixelBufferPixelFormatTypeKey: kCVPixelFormatType_32BGRA,
             kCVPixelBufferWidthKey: Int(size.width),
             kCVPixelBufferHeightKey: Int(size.height)
         ] as [CFString : Any]
