@@ -1,6 +1,8 @@
 name: Build unsigned IPA
 
 on:
+  push:
+    branches: [ main, master ]
   workflow_dispatch:
 
 jobs:
