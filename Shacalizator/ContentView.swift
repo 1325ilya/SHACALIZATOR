@@ -28,7 +28,6 @@ final class ContentViewModel {
         Task { @MainActor in
             isProcessing = true
             processingProgress = 0.0
-            defer { isProcessing = false }
 
             // Reset old state
             selectedImage = nil
@@ -39,27 +38,47 @@ final class ContentViewModel {
             isVideo = false
 
             // Check if it conforms to video/movie
-            let isMovie = item.supportedContentTypes.contains(where: { $0.conforms(to: .movie) })
+            let isMovie = item.supportedContentTypes.contains(where: { $0.conforms(to: .movie) || $0.conforms(to: .video) })
             if isMovie {
-                do {
-                    if let tempURL = try await item.loadTransferable(type: URL.self) {
+                let typeIdentifier = item.itemProvider.registeredTypeIdentifiers.first(where: {
+                    UTType($0)?.conforms(to: .movie) == true || UTType($0)?.conforms(to: .video) == true
+                }) ?? UTType.movie.identifier
+
+                item.itemProvider.loadFileRepresentation(forTypeIdentifier: typeIdentifier) { url, error in
+                    if let tempURL = url {
                         let destinationURL = FileManager.default.temporaryDirectory
                             .appendingPathComponent(UUID().uuidString)
                             .appendingPathExtension(tempURL.pathExtension.isEmpty ? "mp4" : tempURL.pathExtension)
-                        try FileManager.default.copyItem(at: tempURL, to: destinationURL)
                         
-                        selectedVideoURL = destinationURL
-                        isVideo = true
+                        do {
+                            if FileManager.default.fileExists(atPath: destinationURL.path) {
+                                try FileManager.default.removeItem(at: destinationURL)
+                            }
+                            try FileManager.default.copyItem(at: tempURL, to: destinationURL)
+                            
+                            Task { @MainActor in
+                                self.selectedVideoURL = destinationURL
+                                self.isVideo = true
+                                self.isProcessing = false
+                            }
+                        } catch {
+                            Task { @MainActor in
+                                self.toastMessage = "Ошибка сохранения видео: \(error.localizedDescription)"
+                                self.showToast = true
+                                self.isProcessing = false
+                            }
+                        }
                     } else {
-                        toastMessage = "Не удалось загрузить видео"
-                        showToast = true
+                        Task { @MainActor in
+                            self.toastMessage = "Не удалось загрузить видео: \(error?.localizedDescription ?? "неизвестная ошибка")"
+                            self.showToast = true
+                            self.isProcessing = false
+                        }
                     }
-                } catch {
-                    toastMessage = "Ошибка при загрузке видео: \(error.localizedDescription)"
-                    showToast = true
                 }
             } else {
                 // Load as image
+                defer { isProcessing = false }
                 if let data = try? await item.loadTransferable(type: Data.self),
                    let fullImage = UIImage(data: data) {
                     let downsampled = downsample(fullImage, maxDimension: 4096)
