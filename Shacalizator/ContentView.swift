@@ -4,6 +4,27 @@ import Observation
 import AVKit
 import UniformTypeIdentifiers
 
+struct VideoTransferable: Transferable {
+    let url: URL
+    
+    static var transferRepresentation: some TransferRepresentation {
+        FileRepresentation(contentType: .movie) { exporting in
+            SentTransferredFile(exporting.url)
+        } importing: { received in
+            let copy = FileManager.default.temporaryDirectory
+                .appendingPathComponent(UUID().uuidString)
+                .appendingPathExtension(received.file.pathExtension.isEmpty ? "mp4" : received.file.pathExtension)
+            
+            if FileManager.default.fileExists(atPath: copy.path) {
+                try FileManager.default.removeItem(at: copy)
+            }
+            
+            try FileManager.default.copyItem(at: received.file, to: copy)
+            return VideoTransferable(url: copy)
+        }
+    }
+}
+
 @Observable
 final class ContentViewModel {
     var selectedImage: UIImage?
@@ -40,42 +61,19 @@ final class ContentViewModel {
             // Check if it conforms to video/movie
             let isMovie = item.supportedContentTypes.contains(where: { $0.conforms(to: .movie) || $0.conforms(to: .video) })
             if isMovie {
-                let typeIdentifier = item.itemProvider.registeredTypeIdentifiers.first(where: {
-                    UTType($0)?.conforms(to: .movie) == true || UTType($0)?.conforms(to: .video) == true
-                }) ?? UTType.movie.identifier
-
-                item.itemProvider.loadFileRepresentation(forTypeIdentifier: typeIdentifier) { url, error in
-                    if let tempURL = url {
-                        let destinationURL = FileManager.default.temporaryDirectory
-                            .appendingPathComponent(UUID().uuidString)
-                            .appendingPathExtension(tempURL.pathExtension.isEmpty ? "mp4" : tempURL.pathExtension)
-                        
-                        do {
-                            if FileManager.default.fileExists(atPath: destinationURL.path) {
-                                try FileManager.default.removeItem(at: destinationURL)
-                            }
-                            try FileManager.default.copyItem(at: tempURL, to: destinationURL)
-                            
-                            Task { @MainActor in
-                                self.selectedVideoURL = destinationURL
-                                self.isVideo = true
-                                self.isProcessing = false
-                            }
-                        } catch {
-                            Task { @MainActor in
-                                self.toastMessage = "Ошибка сохранения видео: \(error.localizedDescription)"
-                                self.showToast = true
-                                self.isProcessing = false
-                            }
-                        }
+                do {
+                    if let videoTrans = try await item.loadTransferable(type: VideoTransferable.self) {
+                        self.selectedVideoURL = videoTrans.url
+                        self.isVideo = true
                     } else {
-                        Task { @MainActor in
-                            self.toastMessage = "Не удалось загрузить видео: \(error?.localizedDescription ?? "неизвестная ошибка")"
-                            self.showToast = true
-                            self.isProcessing = false
-                        }
+                        self.toastMessage = "Не удалось загрузить видео"
+                        self.showToast = true
                     }
+                } catch {
+                    self.toastMessage = "Не удалось загрузить видео: \(error.localizedDescription)"
+                    self.showToast = true
                 }
+                self.isProcessing = false
             } else {
                 // Load as image
                 defer { isProcessing = false }
