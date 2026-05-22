@@ -11,15 +11,23 @@ struct VideoTransferable: Transferable {
         FileRepresentation(contentType: .movie) { exporting in
             SentTransferredFile(exporting.url)
         } importing: { received in
+            let fileURL = received.file
+            let isAccessing = fileURL.startAccessingSecurityScopedResource()
+            defer {
+                if isAccessing {
+                    fileURL.stopAccessingSecurityScopedResource()
+                }
+            }
+            
             let copy = FileManager.default.temporaryDirectory
                 .appendingPathComponent(UUID().uuidString)
-                .appendingPathExtension(received.file.pathExtension.isEmpty ? "mp4" : received.file.pathExtension)
+                .appendingPathExtension(fileURL.pathExtension.isEmpty ? "mp4" : fileURL.pathExtension)
             
             if FileManager.default.fileExists(atPath: copy.path) {
                 try FileManager.default.removeItem(at: copy)
             }
             
-            try FileManager.default.copyItem(at: received.file, to: copy)
+            try FileManager.default.copyItem(at: fileURL, to: copy)
             return VideoTransferable(url: copy)
         }
     }
